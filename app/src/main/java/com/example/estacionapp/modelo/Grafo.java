@@ -9,8 +9,9 @@ public class Grafo {
         nodos = new HashMap<>();
     }
 
-    public Nodo agregarNodo(String nombre) {
-        Nodo nodo = new Nodo(nombre);
+    // Crear nodo con coordenadas reales
+    public Nodo agregarNodo(String nombre, double lat, double lon) {
+        Nodo nodo = new Nodo(nombre, lat, lon);
         nodos.put(nombre, nodo);
         return nodo;
     }
@@ -19,9 +20,9 @@ public class Grafo {
         Nodo nodoOrigen = nodos.get(origen);
         Nodo nodoDestino = nodos.get(destino);
 
-        if(nodoOrigen != null && nodoDestino != null) {
+        if (nodoOrigen != null && nodoDestino != null) {
             nodoOrigen.agregarVecino(nodoDestino, distancia);
-            nodoDestino.agregarVecino(nodoOrigen, distancia); //Bidireccional
+            nodoDestino.agregarVecino(nodoOrigen, distancia); // Bidireccional
         }
     }
 

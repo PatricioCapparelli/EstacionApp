@@ -17,11 +17,12 @@ public class Simulador {
 
     private void inicializarMapa() {
         // Crear nodos (calles/esquinas)
-        grafo.agregarNodo("A");
-        grafo.agregarNodo("B");
-        grafo.agregarNodo("C");
-        grafo.agregarNodo("D");
-        grafo.agregarNodo("E");
+        grafo.agregarNodo("A", -34.6037, -58.3816);
+        grafo.agregarNodo("B", -34.6045, -58.3825);
+        grafo.agregarNodo("C", -34.6028, -58.3830);
+        grafo.agregarNodo("D", -34.6020, -58.3810);
+        grafo.agregarNodo("E", -34.6010, -58.3820);
+
 
         // Crear calles (aristas)
         grafo.agregarArista("A", "B", 2);

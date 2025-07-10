@@ -5,18 +5,27 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
+    <!-- Mapa con OpenStreetMap (osmdroid) -->
+    <org.osmdroid.views.MapView
+        android:id="@+id/map"
+        android:layout_width="match_parent"
+        android:layout_height="300dp" />
+
+    <!-- Entrada para ubicación -->
     <EditText
         android:id="@+id/editUbicacion"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="Tu ubicación (entre A y E)" />
+        android:hint="Tu ubicación (coordenadas o nombre)" />
 
+    <!-- Botón de acción -->
     <Button
         android:id="@+id/btnBuscar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Buscar lugar libre" />
 
+    <!-- Resultado -->
     <TextView
         android:id="@+id/txtResultado"
         android:layout_width="match_parent"

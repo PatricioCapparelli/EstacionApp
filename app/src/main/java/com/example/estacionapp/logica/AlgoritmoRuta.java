@@ -1,51 +1,59 @@
 package com.example.estacionapp.logica;
 
-import com.example.estacionapp.modelo.Grafo;
 import com.example.estacionapp.modelo.Nodo;
-
+import com.example.estacionapp.modelo.Grafo;
 import java.util.*;
 
 public class AlgoritmoRuta {
 
     public static List<Nodo> encontrarRutaMasCorta(Grafo grafo, Nodo inicio, Nodo destino) {
-
-        // === 1. Inicializar estructuras ===
         Map<Nodo, Integer> distancias = new HashMap<>();
-        Map<Nodo, Nodo> previos     = new HashMap<>();
+        Map<Nodo, Nodo> padres = new HashMap<>();
+        Set<Nodo> visitados = new HashSet<>();
+        PriorityQueue<Nodo> cola = new PriorityQueue<>(Comparator.comparingInt(distancias::get));
 
-        for (Nodo n : grafo.obtenerNodos()) {        // <── usamos TODOS los nodos
-            distancias.put(n, Integer.MAX_VALUE);
+        // Inicializar distancias para todos los nodos
+        for (Nodo nodo : grafo.obtenerNodos()) {
+            distancias.put(nodo, Integer.MAX_VALUE);
         }
         distancias.put(inicio, 0);
-
-        PriorityQueue<Nodo> cola = new PriorityQueue<>(Comparator.comparingInt(distancias::get));
-        Set<Nodo> visitados = new HashSet<>();
         cola.add(inicio);
 
-        // === 2. Dijkstra estándar ===
         while (!cola.isEmpty()) {
             Nodo actual = cola.poll();
-            if (!visitados.add(actual)) continue;
+            if (visitados.contains(actual)) continue;
+            visitados.add(actual);
 
-            for (Map.Entry<Nodo, Integer> e : actual.getVecinos().entrySet()) {
-                Nodo vecino  = e.getKey();
-                int  peso    = e.getValue();
+            if (actual.equals(destino)) break;
 
-                int nuevaDist = distancias.get(actual) + peso;
-                if (nuevaDist < distancias.get(vecino)) {
-                    distancias.put(vecino, nuevaDist);
-                    previos.put(vecino, actual);
+            int distanciaActual = distancias.get(actual);
+
+            for (Map.Entry<Nodo, Integer> vecinoEntry : actual.getVecinos().entrySet()) {
+                Nodo vecino = vecinoEntry.getKey();
+                int peso = vecinoEntry.getValue();
+                int nuevaDistancia = distanciaActual + peso;
+
+                if (nuevaDistancia < distancias.get(vecino)) {
+                    distancias.put(vecino, nuevaDistancia);
+                    padres.put(vecino, actual);
                     cola.add(vecino);
                 }
             }
         }
 
-        // === 3. Reconstruir ruta ===
+        // Reconstruir ruta
         List<Nodo> ruta = new ArrayList<>();
-        for (Nodo at = destino; at != null; at = previos.get(at)) {
-            ruta.add(at);
+        Nodo actual = destino;
+        while (actual != null) {
+            ruta.add(actual);
+            actual = padres.get(actual);
         }
         Collections.reverse(ruta);
-        return ruta;
+
+        if (!ruta.isEmpty() && ruta.get(0).equals(inicio)) {
+            return ruta;
+        } else {
+            return Collections.emptyList();
+        }
     }
 }
