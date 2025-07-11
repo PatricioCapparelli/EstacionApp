@@ -1,7 +1,16 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+}
+
+val localProperties = Properties().apply {
+    val localFile = rootProject.file("local.properties")
+    if (localFile.exists()) {
+        localFile.inputStream().use { load(it) }
+    }
 }
 
 android {
@@ -15,7 +24,13 @@ android {
         versionCode = 1
         versionName = "1.0"
 
+        buildConfigField("String", "CLIENT_ID", "\"${localProperties.getProperty("client_id") ?: ""}\"")
+        buildConfigField("String", "CLIENT_SECRET", "\"${localProperties.getProperty("client_secret") ?: ""}\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     buildTypes {

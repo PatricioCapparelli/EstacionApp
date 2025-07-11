@@ -5,6 +5,7 @@ import android.location.Location;
 import android.os.AsyncTask;
 import android.util.Log;
 
+import com.example.estacionapp.BuildConfig;
 import com.example.estacionapp.R;
 import com.example.estacionapp.util.Geocodificador;
 
@@ -39,13 +40,18 @@ public class EstacionamientoBot {
 
         @Override
         protected JSONArray doInBackground(Double... coords) {
+
             try {
+
+                String clientId = BuildConfig.CLIENT_ID;
+                String clientSecret = BuildConfig.CLIENT_SECRET;
+
                 double x = coords[0];
                 double y = coords[1];
 
                 String url = "https://apitransporte.buenosaires.gob.ar/transito/v1/estacionamientos" +
-                        "?client_id=29b2db64f20749a2902f36aba8e3ca90" +
-                        "&client_secret=8D6ed9461aC64e18bAd7f1033c368a70" +
+                        "?client_id=" + clientId +
+                        "&client_secret=" + clientSecret +
                         "&x=" + x +
                         "&y=" + y +
                         "&srid=4326" +
