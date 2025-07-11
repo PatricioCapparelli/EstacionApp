@@ -3,224 +3,262 @@ package com.example.estacionapp;
 import android.Manifest;
 import android.content.pm.PackageManager;
 import android.location.Location;
-import android.location.LocationManager;
 import android.os.Bundle;
-import android.widget.Button;
-import android.widget.EditText;
-import android.widget.TextView;
+import android.os.Looper;
+import android.util.Log;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
-import androidx.core.app.ActivityCompat;
-import androidx.core.content.ContextCompat;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
 
-import com.example.estacionapp.logica.AlgoritmoRuta;
-import com.example.estacionapp.modelo.Grafo;
-import com.example.estacionapp.modelo.Nodo;
+import com.example.estacionapp.bot.EstacionamientoBot;
+import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationAvailability;
+import com.google.android.gms.location.LocationCallback;
+import com.google.android.gms.location.LocationRequest;
+import com.google.android.gms.location.LocationResult;
+import com.google.android.gms.location.LocationServices;
+import com.google.android.gms.location.LocationSettingsRequest;
+import com.google.android.gms.location.SettingsClient;
 
-import org.osmdroid.api.IMapController;
 import org.osmdroid.config.Configuration;
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory;
 import org.osmdroid.util.GeoPoint;
 import org.osmdroid.views.MapView;
 import org.osmdroid.views.overlay.Marker;
-import org.osmdroid.views.overlay.Polyline;
-
-import android.graphics.Color;
-
-import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
 
-    private static final int REQUEST_LOCATION_PERMISSION = 1;
+    private static final int REQUEST_PERMISSIONS_REQUEST_CODE = 1;
+    private static final int REQUEST_LOCATION_SETTINGS = 2;
+    private static final long LOCATION_UPDATE_INTERVAL = 10000; // 10 segundos
+    private static final long FASTEST_LOCATION_INTERVAL = 5000; // 5 segundos
+    private static final float LOCATION_ACCURACY_THRESHOLD = 50; // 50 metros
 
-    private MapView map;
-    private Grafo grafo;
-
-    private Polyline rutaOverlay = null;
+    private MapView mapView;
+    private FusedLocationProviderClient fusedLocationClient;
+    private Marker userLocationMarker;
+    private Location lastKnownLocation;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        Configuration.getInstance().setUserAgentValue(getPackageName());
+        // Configuración de OSMDroid
+        Configuration.getInstance().load(getApplicationContext(),
+                androidx.preference.PreferenceManager.getDefaultSharedPreferences(getApplicationContext()));
 
         setContentView(R.layout.activity_main);
 
-        map = findViewById(R.id.map);
-        map.setTileSource(TileSourceFactory.MAPNIK);
-        map.setMultiTouchControls(true);
+        initializeMap();
+        initializeLocationClient();
+        requestLocationPermissions();
+    }
 
-        grafo = new Grafo();
-        inicializarGrafo();
-
-        Button btnBuscar = findViewById(R.id.btnBuscar);
-        EditText editUbicacion = findViewById(R.id.editUbicacion);
-        TextView txtResultado = findViewById(R.id.txtResultado);
-
-        btnBuscar.setOnClickListener(v -> {
-            String ubic = editUbicacion.getText().toString().trim().toUpperCase();
-
-            Nodo inicio = grafo.obtenerNodo(ubic);
-            if (inicio == null) {
-                txtResultado.setText("Ubicación inválida (usa A, B, C, ...)");
-                return;
-            }
-
-            // Buscar el lugar libre más cercano
-            Nodo destino = null;
-            int distanciaMin = Integer.MAX_VALUE;
-            List<Nodo> mejorRuta = null;
-
-            for (Nodo nodo : grafo.obtenerNodos()) {
-                if (nodo.estaLibre()) {
-                    List<Nodo> ruta = AlgoritmoRuta.encontrarRutaMasCorta(grafo, inicio, nodo);
-                    if (!ruta.isEmpty() && ruta.size() < distanciaMin) {
-                        distanciaMin = ruta.size();
-                        destino = nodo;
-                        mejorRuta = ruta;
-                    }
-                }
-            }
-
-            if (destino == null) {
-                txtResultado.setText("No hay lugares libres disponibles");
-                return;
-            }
-
-            mostrarRuta(mejorRuta);
-
-            StringBuilder sb = new StringBuilder("Ruta: ");
-            for (int i = 0; i < mejorRuta.size(); i++) {
-                sb.append(mejorRuta.get(i).getNombre());
-                if (i < mejorRuta.size() - 1) sb.append(" → ");
-            }
-            sb.append("\n¡Estacioná en ").append(destino.getNombre()).append("!");
-            txtResultado.setText(sb.toString());
-        });
-
-        // Pedir permiso de ubicación si no está dado
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
-                != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this,
-                    new String[]{Manifest.permission.ACCESS_FINE_LOCATION},
-                    REQUEST_LOCATION_PERMISSION);
+    private void initializeMap() {
+        mapView = findViewById(R.id.map);
+        if (mapView != null) {
+            mapView.setMultiTouchControls(true);
         } else {
-            centrarEnUbicacionActual();
-        }
-
-        mostrarMarcadores();
-    }
-
-    private void inicializarGrafo() {
-        Nodo a = grafo.agregarNodo("A", -34.6037, -58.3816);
-        Nodo b = grafo.agregarNodo("B", -34.6045, -58.3825);
-        Nodo c = grafo.agregarNodo("C", -34.6028, -58.3830);
-        Nodo d = grafo.agregarNodo("D", -34.6020, -58.3810);
-        Nodo e = grafo.agregarNodo("E", -34.6010, -58.3820);
-
-        conectarConDistancia("A", "B");
-        conectarConDistancia("B", "C");
-        conectarConDistancia("C", "D");
-        conectarConDistancia("D", "E");
-
-        // Simular lugares libres
-        b.setLibre(true);
-        e.setLibre(true);
-    }
-
-    private void conectarConDistancia(String nombre1, String nombre2) {
-        Nodo n1 = grafo.obtenerNodo(nombre1);
-        Nodo n2 = grafo.obtenerNodo(nombre2);
-        if (n1 != null && n2 != null) {
-            int distancia = (int) n1.getUbicacion().distanceToAsDouble(n2.getUbicacion());
-            grafo.agregarArista(nombre1, nombre2, distancia);
+            Log.e("MainActivity", "Error al inicializar el mapa");
+            Toast.makeText(this, "Error al inicializar el mapa", Toast.LENGTH_LONG).show();
         }
     }
 
-    private void mostrarMarcadores() {
-        map.getOverlays().clear();
-
-        for (Nodo nodo : grafo.obtenerNodos()) {
-            Marker marker = new Marker(map);
-            marker.setPosition(nodo.getUbicacion());
-            marker.setTitle("Nodo " + nodo.getNombre());
-
-            if (nodo.estaLibre()) {
-                marker.setIcon(getResources().getDrawable(android.R.drawable.presence_online, null));
-            } else {
-                marker.setIcon(getResources().getDrawable(android.R.drawable.presence_busy, null));
-            }
-
-            map.getOverlays().add(marker);
-        }
-        map.invalidate();
+    private void initializeLocationClient() {
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
     }
 
-    private void mostrarRuta(List<Nodo> ruta) {
-        if (rutaOverlay != null) {
-            map.getOverlays().remove(rutaOverlay);
-        }
+    private void requestLocationPermissions() {
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED ||
+                ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
 
-        rutaOverlay = new Polyline();
-        rutaOverlay.setColor(Color.BLUE);
-        rutaOverlay.setWidth(8f);
-
-        for (Nodo nodo : ruta) {
-            rutaOverlay.addPoint(nodo.getUbicacion());
-        }
-
-        map.getOverlays().add(rutaOverlay);
-        map.invalidate();
-
-        if (!ruta.isEmpty()) {
-            IMapController controller = map.getController();
-            controller.setZoom(18.0);
-            controller.setCenter(ruta.get(0).getUbicacion());
+            ActivityCompat.requestPermissions(this,
+                    new String[]{
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION
+                    },
+                    REQUEST_PERMISSIONS_REQUEST_CODE);
+        } else {
+            checkLocationSettingsAndStartUpdates();
         }
     }
 
-    private void centrarEnUbicacionActual() {
-        LocationManager locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
-        if (locationManager == null) return;
+    private void checkLocationSettingsAndStartUpdates() {
+        LocationRequest locationRequest = createLocationRequest();
+        LocationSettingsRequest.Builder builder = new LocationSettingsRequest.Builder()
+                .addLocationRequest(locationRequest);
 
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
-                && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+        SettingsClient client = LocationServices.getSettingsClient(this);
+        client.checkLocationSettings(builder.build())
+                .addOnSuccessListener(this, locationSettingsResponse -> startLocationUpdates())
+                .addOnFailureListener(this, e -> {
+                    Log.w("MainActivity", "Configuración de ubicación no satisfecha", e);
+                    Toast.makeText(MainActivity.this, "Active los servicios de ubicación para una mejor experiencia", Toast.LENGTH_LONG).show();
+                });
+    }
+
+    private LocationRequest createLocationRequest() {
+        LocationRequest locationRequest = LocationRequest.create();
+        locationRequest.setInterval(LOCATION_UPDATE_INTERVAL);
+        locationRequest.setFastestInterval(FASTEST_LOCATION_INTERVAL);
+        locationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
+        return locationRequest;
+    }
+
+    private void startLocationUpdates() {
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+                ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             return;
         }
 
-        Location location = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
-        if (location == null) {
-            location = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
+        fusedLocationClient.requestLocationUpdates(
+                createLocationRequest(),
+                locationCallback,
+                Looper.getMainLooper()
+        );
+    }
+
+    private final LocationCallback locationCallback = new LocationCallback() {
+        @Override
+        public void onLocationResult(@NonNull LocationResult locationResult) {
+            if (locationResult == null) return;
+
+            Location location = locationResult.getLastLocation();
+            if (location != null && isBetterLocation(location, lastKnownLocation)) {
+                lastKnownLocation = location;
+                Log.d("MainActivity", "Nueva ubicación: " + location.getLatitude() + ", " + location.getLongitude());
+                updateUserLocationOnMap(location);
+                EstacionamientoBot.sugerirEstacionamiento(MainActivity.this, location, mapView);
+            }
         }
 
-        GeoPoint startPoint;
-        if (location != null) {
-            startPoint = new GeoPoint(location.getLatitude(), location.getLongitude());
-        } else {
-            // Si no hay ubicación, centro por defecto (Buenos Aires)
-            startPoint = new GeoPoint(-34.6037, -58.3816);
+        @Override
+        public void onLocationAvailability(@NonNull LocationAvailability locationAvailability) {
+            if (!locationAvailability.isLocationAvailable()) {
+                Log.w("MainActivity", "Ubicación no disponible");
+            }
+        }
+    };
+
+    private boolean isBetterLocation(Location location, Location currentBestLocation) {
+        if (currentBestLocation == null) {
+            return true;
         }
 
-        IMapController mapController = map.getController();
-        mapController.setZoom(17.0);
-        mapController.setCenter(startPoint);
+        long timeDelta = location.getTime() - currentBestLocation.getTime();
+        boolean isSignificantlyNewer = timeDelta > LOCATION_UPDATE_INTERVAL;
+        boolean isSignificantlyOlder = timeDelta < -LOCATION_UPDATE_INTERVAL;
+        boolean isNewer = timeDelta > 0;
+
+        if (isSignificantlyNewer) {
+            return true;
+        } else if (isSignificantlyOlder) {
+            return false;
+        }
+
+        int accuracyDelta = (int) (location.getAccuracy() - currentBestLocation.getAccuracy());
+        boolean isLessAccurate = accuracyDelta > 0;
+        boolean isMoreAccurate = accuracyDelta < 0;
+        boolean isSignificantlyLessAccurate = accuracyDelta > LOCATION_ACCURACY_THRESHOLD;
+
+        boolean isFromSameProvider = location.getProvider().equals(currentBestLocation.getProvider());
+
+        if (isMoreAccurate) {
+            return true;
+        } else if (isNewer && !isLessAccurate) {
+            return true;
+        } else if (isNewer && !isSignificantlyLessAccurate && isFromSameProvider) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private void updateUserLocationOnMap(Location location) {
+        runOnUiThread(() -> {
+            if (mapView == null) return;
+
+            // Verificamos si es la primera ubicación o si necesitamos centrar el mapa
+            boolean shouldCenterMap = (userLocationMarker == null);
+
+            if (userLocationMarker == null) {
+                userLocationMarker = new Marker(mapView);
+                userLocationMarker.setTitle("Tu ubicación");
+                userLocationMarker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM);
+                mapView.getOverlays().add(userLocationMarker);
+            }
+
+            GeoPoint newLocation = new GeoPoint(location.getLatitude(), location.getLongitude());
+            userLocationMarker.setPosition(newLocation);
+
+            // Siempre centramos y hacemos zoom la primera vez
+            if (shouldCenterMap) {
+                mapView.getController().setZoom(18.0);  // Aumenté el zoom para mejor visualización
+                mapView.getController().setCenter(newLocation);
+            }
+
+            mapView.invalidate();
+        });
+    }
+
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+
+        if (requestCode == REQUEST_PERMISSIONS_REQUEST_CODE) {
+            boolean allPermissionsGranted = true;
+            for (int result : grantResults) {
+                if (result != PackageManager.PERMISSION_GRANTED) {
+                    allPermissionsGranted = false;
+                    break;
+                }
+            }
+
+            if (allPermissionsGranted) {
+                checkLocationSettingsAndStartUpdates();
+            } else {
+                Toast.makeText(this, "Los permisos de ubicación son necesarios para la funcionalidad completa", Toast.LENGTH_LONG).show();
+            }
+        }
     }
 
     @Override
-    public void onRequestPermissionsResult(int requestCode,
-                                           @NonNull String[] permissions,
-                                           @NonNull int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == REQUEST_LOCATION_PERMISSION) {
-            if (grantResults.length > 0
-                    && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                centrarEnUbicacionActual();
-            } else {
-                Toast.makeText(this, "Permiso de ubicación denegado", Toast.LENGTH_SHORT).show();
-                centrarEnUbicacionActual();
-            }
+    protected void onResume() {
+        super.onResume();
+        if (mapView != null) {
+            mapView.onResume();
         }
+
+        if (hasLocationPermissions()) {
+            startLocationUpdates();
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (mapView != null) {
+            mapView.onPause();
+        }
+        stopLocationUpdates();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        stopLocationUpdates();
+    }
+
+    private void stopLocationUpdates() {
+        if (fusedLocationClient != null) {
+            fusedLocationClient.removeLocationUpdates(locationCallback);
+        }
+    }
+
+    private boolean hasLocationPermissions() {
+        return ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
     }
 }
