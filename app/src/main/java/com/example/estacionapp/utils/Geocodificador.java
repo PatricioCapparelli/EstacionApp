@@ -1,83 +1,75 @@
-package com.example.estacionapp.util;
+package com.example.estacionapp.utils;
 
+import android.os.AsyncTask;
 import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
-import org.osmdroid.util.GeoPoint;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.net.URLEncoder;
+import java.util.Locale;
 
 public class Geocodificador {
 
-    public static Integer buscarCodCalle(String nombreCalle) {
-        try {
-            String url = "https://apitransporte.buenosaires.gob.ar/geocodificacion/v1/callejero?nombre=" +
-                    URLEncoder.encode(nombreCalle, "UTF-8");
+    private static final String TAG = "Geocodificador";
 
-            HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-            conn.setRequestMethod("GET");
+    public static void buscarCodCalle(final String nombreCalle, final CodCalleCallback callback) {
+        new AsyncTask<Void, Void, Integer>() {
+            private Exception error;
 
-            BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-            StringBuilder result = new StringBuilder();
-            String line;
+            @Override
+            protected Integer doInBackground(Void... voids) {
+                try {
+                    String urlStr = String.format(Locale.US,
+                            "https://apitransporte.buenosaires.gob.ar/transito/v1/calles?client_id=%s&client_secret=%s&nombre=%s&formato=json",
+                            "tu_client_id", "tu_client_secret", nombreCalle.replace(" ", "%20"));
 
-            while ((line = in.readLine()) != null) {
-                result.append(line);
+                    Log.d(TAG, "URL buscarCodCalle: " + urlStr);
+
+                    HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
+                    conn.setRequestMethod("GET");
+
+                    int responseCode = conn.getResponseCode();
+                    if (responseCode != 200) {
+                        error = new Exception("Error de conexión. Código: " + responseCode);
+                        return null;
+                    }
+
+                    BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                    StringBuilder response = new StringBuilder();
+                    String line;
+
+                    while ((line = in.readLine()) != null) {
+                        response.append(line);
+                    }
+                    in.close();
+
+                    JSONObject json = new JSONObject(response.toString());
+                    JSONArray calles = json.getJSONArray("calles");
+
+                    if (calles.length() == 0) return null;
+
+                    JSONObject calle = calles.getJSONObject(0);
+                    return calle.getInt("cod_calle");
+
+                } catch (Exception e) {
+                    error = e;
+                    Log.e(TAG, "Error en buscarCodCalle", e);
+                    return null;
+                }
             }
 
-            in.close();
-            JSONArray calles = new JSONArray(result.toString());
-
-            if (calles.length() > 0) {
-                return calles.getJSONObject(0).getInt("cod_calle");
+            @Override
+            protected void onPostExecute(Integer codCalle) {
+                if (error != null) {
+                    callback.onError(error);
+                } else {
+                    callback.onCodCalleObtenido(codCalle);
+                }
             }
-
-        } catch (Exception e) {
-            Log.e("Geocodificador", "Error obteniendo cod_calle", e);
-        }
-
-        return null;
-    }
-
-    public static GeoPoint geocodificar(int codCalle, int altura) {
-        try {
-            String url = "https://apitransporte.buenosaires.gob.ar/geocodificacion?" +
-                    "cod_calle=" + codCalle +
-                    "&altura=" + altura +
-                    "&metodo=puertas";
-
-            HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-            conn.setRequestMethod("GET");
-
-            BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream()));
-            StringBuilder result = new StringBuilder();
-            String line;
-
-            while ((line = in.readLine()) != null) {
-                result.append(line);
-            }
-
-            in.close();
-            JSONArray respuesta = new JSONArray(result.toString());
-
-            if (respuesta.length() > 0) {
-                JSONObject punto = respuesta.getJSONObject(0);
-                double x = punto.getDouble("x");
-                double y = punto.getDouble("y");
-
-                // La API del GCBA devuelve x = long, y = lat en WGS84
-                return new GeoPoint(y, x);
-            }
-
-        } catch (Exception e) {
-            Log.e("Geocodificador", "Error geocodificando", e);
-        }
-
-        return null;
+        }.execute();
     }
 }

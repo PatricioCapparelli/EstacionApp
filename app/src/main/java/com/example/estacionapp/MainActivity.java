@@ -13,6 +13,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 
 import com.example.estacionapp.bot.EstacionamientoBot;
+
 import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.LocationAvailability;
 import com.google.android.gms.location.LocationCallback;
@@ -26,11 +27,13 @@ import org.osmdroid.config.Configuration;
 import org.osmdroid.util.GeoPoint;
 import org.osmdroid.views.MapView;
 import org.osmdroid.views.overlay.Marker;
+import org.osmdroid.views.overlay.Overlay;
+
+import android.view.MotionEvent;
 
 public class MainActivity extends AppCompatActivity {
 
     private static final int REQUEST_PERMISSIONS_REQUEST_CODE = 1;
-    private static final int REQUEST_LOCATION_SETTINGS = 2;
     private static final long LOCATION_UPDATE_INTERVAL = 10000; // 10 segundos
     private static final long FASTEST_LOCATION_INTERVAL = 5000; // 5 segundos
     private static final float LOCATION_ACCURACY_THRESHOLD = 50; // 50 metros
@@ -44,7 +47,6 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Configuración de OSMDroid
         Configuration.getInstance().load(getApplicationContext(),
                 androidx.preference.PreferenceManager.getDefaultSharedPreferences(getApplicationContext()));
 
@@ -59,9 +61,45 @@ public class MainActivity extends AppCompatActivity {
         mapView = findViewById(R.id.map);
         if (mapView != null) {
             mapView.setMultiTouchControls(true);
+
+            // Agregamos overlay personalizado para detectar taps
+            mapView.getOverlays().add(new TapOverlay(mapView));
+
         } else {
             Log.e("MainActivity", "Error al inicializar el mapa");
             Toast.makeText(this, "Error al inicializar el mapa", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private class TapOverlay extends Overlay {
+        private MapView mapView;
+
+        public TapOverlay(MapView mapView) {
+            this.mapView = mapView;
+        }
+
+        @Override
+        public boolean onSingleTapConfirmed(MotionEvent e, MapView mapView) {
+            GeoPoint p = (GeoPoint) mapView.getProjection().fromPixels((int) e.getX(), (int) e.getY());
+            Log.d("MainActivity", "Tap detectado en lat: " + p.getLatitude() + ", lon: " + p.getLongitude());
+
+            // Agregar marcador en la posición tocada
+            Marker marker = new Marker(mapView);
+            marker.setPosition(p);
+            marker.setTitle("Zona seleccionada");
+            marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM);
+
+            mapView.getOverlays().add(marker);
+            mapView.invalidate();
+
+            // Crear objeto Location para pasar al bot
+            Location location = new Location("tap");
+            location.setLatitude(p.getLatitude());
+            location.setLongitude(p.getLongitude());
+
+            EstacionamientoBot.sugerirEstacionamiento(MainActivity.this, location, mapView);
+
+            return true;
         }
     }
 
@@ -179,7 +217,6 @@ public class MainActivity extends AppCompatActivity {
         runOnUiThread(() -> {
             if (mapView == null) return;
 
-            // Verificamos si es la primera ubicación o si necesitamos centrar el mapa
             boolean shouldCenterMap = (userLocationMarker == null);
 
             if (userLocationMarker == null) {
@@ -192,16 +229,14 @@ public class MainActivity extends AppCompatActivity {
             GeoPoint newLocation = new GeoPoint(location.getLatitude(), location.getLongitude());
             userLocationMarker.setPosition(newLocation);
 
-            // Siempre centramos y hacemos zoom la primera vez
             if (shouldCenterMap) {
-                mapView.getController().setZoom(18.0);  // Aumenté el zoom para mejor visualización
+                mapView.getController().setZoom(18.0);
                 mapView.getController().setCenter(newLocation);
             }
 
             mapView.invalidate();
         });
     }
-
 
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
