@@ -34,14 +34,20 @@ import android.view.MotionEvent;
 public class MainActivity extends AppCompatActivity {
 
     private static final int REQUEST_PERMISSIONS_REQUEST_CODE = 1;
-    private static final long LOCATION_UPDATE_INTERVAL = 10000; // 10 segundos
-    private static final long FASTEST_LOCATION_INTERVAL = 5000; // 5 segundos
-    private static final float LOCATION_ACCURACY_THRESHOLD = 50; // 50 metros
+    private static final long LOCATION_UPDATE_INTERVAL = 10000;
+    private static final long FASTEST_LOCATION_INTERVAL = 5000;
+    private static final float LOCATION_ACCURACY_THRESHOLD = 50;
 
     private MapView mapView;
     private FusedLocationProviderClient fusedLocationClient;
     private Marker userLocationMarker;
     private Location lastKnownLocation;
+
+    // Bandera para bloquear la actualización automática desde el GPS
+    private boolean modoManual = false;
+
+    // Instancia global de EstacionamientoBot para reusar
+    private EstacionamientoBot estacionamientoBot;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -55,16 +61,16 @@ public class MainActivity extends AppCompatActivity {
         initializeMap();
         initializeLocationClient();
         requestLocationPermissions();
+
+        // Crear instancia de EstacionamientoBot una vez
+        estacionamientoBot = new EstacionamientoBot(this, mapView);
     }
 
     private void initializeMap() {
         mapView = findViewById(R.id.map);
         if (mapView != null) {
             mapView.setMultiTouchControls(true);
-
-            // Agregamos overlay personalizado para detectar taps
             mapView.getOverlays().add(new TapOverlay(mapView));
-
         } else {
             Log.e("MainActivity", "Error al inicializar el mapa");
             Toast.makeText(this, "Error al inicializar el mapa", Toast.LENGTH_LONG).show();
@@ -83,21 +89,33 @@ public class MainActivity extends AppCompatActivity {
             GeoPoint p = (GeoPoint) mapView.getProjection().fromPixels((int) e.getX(), (int) e.getY());
             Log.d("MainActivity", "Tap detectado en lat: " + p.getLatitude() + ", lon: " + p.getLongitude());
 
-            // Agregar marcador en la posición tocada
+            // Limpiar marcadores anteriores
+            for (int i = mapView.getOverlays().size() - 1; i >= 0; i--) {
+                if (mapView.getOverlays().get(i) instanceof Marker) {
+                    mapView.getOverlays().remove(i);
+                }
+            }
+
+            // Mostrar marcador en zona tocada
             Marker marker = new Marker(mapView);
             marker.setPosition(p);
             marker.setTitle("Zona seleccionada");
             marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM);
-
             mapView.getOverlays().add(marker);
             mapView.invalidate();
 
-            // Crear objeto Location para pasar al bot
+            // Crear ubicación para API
             Location location = new Location("tap");
             location.setLatitude(p.getLatitude());
             location.setLongitude(p.getLongitude());
 
-            EstacionamientoBot.sugerirEstacionamiento(MainActivity.this, location, mapView);
+            // Modo manual activo (desactiva GPS automático)
+            modoManual = true;
+
+            // Consultar API con esta ubicación usando la instancia de EstacionamientoBot
+            if (estacionamientoBot != null) {
+                estacionamientoBot.buscarEstacionamientosCercanos(location.getLatitude(), location.getLongitude());
+            }
 
             return true;
         }
@@ -167,7 +185,11 @@ public class MainActivity extends AppCompatActivity {
                 lastKnownLocation = location;
                 Log.d("MainActivity", "Nueva ubicación: " + location.getLatitude() + ", " + location.getLongitude());
                 updateUserLocationOnMap(location);
-                EstacionamientoBot.sugerirEstacionamiento(MainActivity.this, location, mapView);
+
+                if (!modoManual && estacionamientoBot != null) {
+                    // Solo consultar API si no estamos en modo manual
+                    estacionamientoBot.buscarEstacionamientosCercanos(location.getLatitude(), location.getLongitude());
+                }
             }
         }
 
@@ -180,20 +202,15 @@ public class MainActivity extends AppCompatActivity {
     };
 
     private boolean isBetterLocation(Location location, Location currentBestLocation) {
-        if (currentBestLocation == null) {
-            return true;
-        }
+        if (currentBestLocation == null) return true;
 
         long timeDelta = location.getTime() - currentBestLocation.getTime();
         boolean isSignificantlyNewer = timeDelta > LOCATION_UPDATE_INTERVAL;
         boolean isSignificantlyOlder = timeDelta < -LOCATION_UPDATE_INTERVAL;
         boolean isNewer = timeDelta > 0;
 
-        if (isSignificantlyNewer) {
-            return true;
-        } else if (isSignificantlyOlder) {
-            return false;
-        }
+        if (isSignificantlyNewer) return true;
+        if (isSignificantlyOlder) return false;
 
         int accuracyDelta = (int) (location.getAccuracy() - currentBestLocation.getAccuracy());
         boolean isLessAccurate = accuracyDelta > 0;
@@ -202,15 +219,9 @@ public class MainActivity extends AppCompatActivity {
 
         boolean isFromSameProvider = location.getProvider().equals(currentBestLocation.getProvider());
 
-        if (isMoreAccurate) {
-            return true;
-        } else if (isNewer && !isLessAccurate) {
-            return true;
-        } else if (isNewer && !isSignificantlyLessAccurate && isFromSameProvider) {
-            return true;
-        }
-
-        return false;
+        if (isMoreAccurate) return true;
+        if (isNewer && !isLessAccurate) return true;
+        return isNewer && !isSignificantlyLessAccurate && isFromSameProvider;
     }
 
     private void updateUserLocationOnMap(Location location) {
